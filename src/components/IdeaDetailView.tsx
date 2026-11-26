@@ -39,6 +39,13 @@ const KINDS: IdeaKind[] = ['idea', 'feature', 'ux', 'bug'];
 const STATUSES: IdeaStatus[] = ['inbox', 'shaping', 'ready', 'done', 'archived'];
 const PRIORITIES: IdeaPriority[] = ['low', 'medium', 'high'];
 
+function mergeBodyAndNotes(body: string, notes: string): string {
+  const b = body.trim();
+  const n = notes.trim();
+  if (b && n) return `${b}\n\n${n}`;
+  return b || n;
+}
+
 export function IdeaDetailView({
   idea,
   folders,
@@ -46,8 +53,9 @@ export function IdeaDetailView({
   onToast,
 }: IdeaDetailViewProps) {
   const [title, setTitle] = useState(idea.title);
-  const [body, setBody] = useState(idea.body);
-  const [notes, setNotes] = useState(idea.notes);
+  const [body, setBody] = useState(() =>
+    idea.notes.trim() ? mergeBodyAndNotes(idea.body, idea.notes) : idea.body
+  );
   const [newTask, setNewTask] = useState('');
   const [newTag, setNewTag] = useState('');
   const [copied, setCopied] = useState(false);
@@ -56,15 +64,15 @@ export function IdeaDetailView({
   const [folderMenuOpen, setFolderMenuOpen] = useState(false);
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const notesRef = useRef<HTMLTextAreaElement>(null);
   const propsRef = useRef<HTMLDivElement>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
 
   // Sync local draft when switching ideas or receiving remote updates
   useEffect(() => {
     setTitle(idea.title);
-    setBody(idea.body);
-    setNotes(idea.notes);
+    setBody(
+      idea.notes.trim() ? mergeBodyAndNotes(idea.body, idea.notes) : idea.body
+    );
     setConfirmDelete(false);
     setPropsOpen(false);
     setFolderMenuOpen(false);
@@ -76,13 +84,6 @@ export function IdeaDetailView({
       bodyRef.current.style.height = `${bodyRef.current.scrollHeight}px`;
     }
   }, [body]);
-
-  useEffect(() => {
-    if (notesRef.current) {
-      notesRef.current.style.height = 'auto';
-      notesRef.current.style.height = `${notesRef.current.scrollHeight}px`;
-    }
-  }, [notes]);
 
   // Close popovers on outside click or Escape
   useEffect(() => {
@@ -124,7 +125,7 @@ export function IdeaDetailView({
 
   const handleCopyPrompt = async () => {
     const promptText = formatIdeaAsPrompt(
-      { ...idea, title, body, notes },
+      { ...idea, title, body, notes: '' },
       currentFolder?.name
     );
     const ok = await copyToClipboard(promptText);
@@ -319,6 +320,44 @@ export function IdeaDetailView({
                       })}
                     </div>
                   </div>
+
+                  <div className="border-t border-[var(--border-subtle)] pt-3">
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                      Etiquetas
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {idea.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]"
+                        >
+                          <Hash size={11} className="text-[var(--text-muted)]" />
+                          {tag}
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveTag(tag)}
+                            aria-label={`Quitar etiqueta ${tag}`}
+                            className="ml-0.5 rounded-full p-0.5 hover:bg-[var(--bg-hover)]"
+                          >
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ))}
+
+                      <input
+                        value={newTag}
+                        onChange={(e) => setNewTag(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            void handleAddTag();
+                          }
+                        }}
+                        placeholder="+ etiqueta"
+                        className="w-28 rounded-full bg-[var(--bg-canvas)] px-2.5 py-1 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -447,16 +486,16 @@ export function IdeaDetailView({
           )}
         </div>
 
-        {/* Editable description */}
+        {/* Single clean description area */}
         <textarea
           ref={bodyRef}
           value={body}
           onChange={(e) => {
             setBody(e.target.value);
-            void updateIdea(idea.id, { body: e.target.value });
+            void updateIdea(idea.id, { body: e.target.value, notes: '' });
           }}
           rows={3}
-          placeholder="Describe qué problema resuelve, cómo debería funcionar o qué te inspiró..."
+          placeholder="Escribe tu idea, detalles o links de referencia..."
           className="mt-4 w-full resize-none bg-transparent text-[15px] leading-relaxed text-[var(--text-secondary)] placeholder:text-[var(--text-muted)] focus:outline-none"
         />
 
@@ -538,60 +577,6 @@ export function IdeaDetailView({
               <Plus size={16} />
             </button>
           </div>
-        </div>
-
-        {/* Tags */}
-        <div className="mt-5 border-t border-[var(--border-subtle)] pt-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {idea.tags.map((tag) => (
-              <span
-                key={tag}
-                className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-subtle)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]"
-              >
-                <Hash size={11} className="text-[var(--text-muted)]" />
-                {tag}
-                <button
-                  type="button"
-                  onClick={() => void handleRemoveTag(tag)}
-                  aria-label={`Quitar etiqueta ${tag}`}
-                  className="ml-0.5 rounded-full p-0.5 hover:bg-[var(--bg-hover)]"
-                >
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
-
-            <input
-              value={newTag}
-              onChange={(e) => setNewTag(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ',') {
-                  e.preventDefault();
-                  void handleAddTag();
-                }
-              }}
-              placeholder="+ etiqueta"
-              className="w-28 rounded-full bg-transparent px-2.5 py-1 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:bg-[var(--bg-canvas)] focus:outline-none"
-            />
-          </div>
-        </div>
-
-        {/* Bottom shaded Notes block (Reference 2) */}
-        <div className="mt-6 rounded-2xl bg-[var(--bg-subtle)]/75 p-4">
-          <label className="block font-display text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-            Notas y contexto
-          </label>
-          <textarea
-            ref={notesRef}
-            value={notes}
-            onChange={(e) => {
-              setNotes(e.target.value);
-              void updateIdea(idea.id, { notes: e.target.value });
-            }}
-            rows={2}
-            placeholder="Links de referencia, detalles técnicos o pensamientos extra..."
-            className="mt-1.5 w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-          />
         </div>
       </div>
     </div>
