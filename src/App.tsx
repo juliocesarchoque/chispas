@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   ArrowLeft,
@@ -47,6 +47,23 @@ import { SearchModal } from './components/SearchModal';
 
 type StatusFilter = 'all' | IdeaStatus;
 type KindFilter = 'all' | IdeaKind;
+type ModalKind = 'capture' | 'search' | 'sync' | 'folder' | 'move' | null;
+
+interface NavHistoryState {
+  chispaNav: true;
+  depth: number;
+  view: ActiveView;
+  selectedIdeaId: string | null;
+  modal: ModalKind;
+}
+
+function isSameView(a: ActiveView, b: ActiveView): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'folder' && b.type === 'folder') {
+    return a.folderId === b.folderId;
+  }
+  return true;
+}
 
 const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'all', label: 'Todas' },
@@ -74,6 +91,137 @@ export function App() {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
   const [movingIdea, setMovingIdea] = useState<Idea | null>(null);
+
+  const viewRef = useRef<ActiveView>(view);
+  viewRef.current = view;
+
+  const pushNav = useCallback(
+    (nextView: ActiveView, nextIdeaId: string | null, nextModal: ModalKind) => {
+      const cur = window.history.state as NavHistoryState | null;
+      const depth = cur?.chispaNav ? cur.depth + 1 : 1;
+      window.history.pushState(
+        {
+          chispaNav: true,
+          depth,
+          view: nextView,
+          selectedIdeaId: nextIdeaId,
+          modal: nextModal,
+        } satisfies NavHistoryState,
+        ''
+      );
+    },
+    []
+  );
+
+  const replaceNav = useCallback(
+    (nextView: ActiveView, nextIdeaId: string | null, nextModal: ModalKind) => {
+      const cur = window.history.state as NavHistoryState | null;
+      const depth = cur?.chispaNav ? cur.depth : 0;
+      window.history.replaceState(
+        {
+          chispaNav: true,
+          depth,
+          view: nextView,
+          selectedIdeaId: nextIdeaId,
+          modal: nextModal,
+        } satisfies NavHistoryState,
+        ''
+      );
+    },
+    []
+  );
+
+  const goBackOr = useCallback((fallback: () => void) => {
+    const cur = window.history.state as NavHistoryState | null;
+    if (cur?.chispaNav && cur.depth > 0) {
+      window.history.back();
+    } else {
+      fallback();
+    }
+  }, []);
+
+  const openCapture = useCallback(() => {
+    setCaptureOpen(true);
+    pushNav(viewRef.current, selectedIdeaId, 'capture');
+  }, [pushNav, selectedIdeaId]);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    pushNav(viewRef.current, selectedIdeaId, 'search');
+  }, [pushNav, selectedIdeaId]);
+
+  const openSyncModal = useCallback(() => {
+    setSyncModalOpen(true);
+    pushNav(viewRef.current, selectedIdeaId, 'sync');
+  }, [pushNav, selectedIdeaId]);
+
+  const openFolderModal = useCallback(
+    (folder: Folder | null) => {
+      setEditingFolder(folder);
+      setFolderModalOpen(true);
+      pushNav(viewRef.current, selectedIdeaId, 'folder');
+    },
+    [pushNav, selectedIdeaId]
+  );
+
+  const openMoveModal = useCallback(
+    (item: Idea) => {
+      setMovingIdea(item);
+      pushNav(viewRef.current, selectedIdeaId, 'move');
+    },
+    [pushNav, selectedIdeaId]
+  );
+
+  const closeModal = useCallback((kind: Exclude<ModalKind, null>) => {
+    if (kind === 'capture') setCaptureOpen(false);
+    if (kind === 'search') setSearchOpen(false);
+    if (kind === 'sync') setSyncModalOpen(false);
+    if (kind === 'folder') setFolderModalOpen(false);
+    if (kind === 'move') setMovingIdea(null);
+
+    const cur = window.history.state as NavHistoryState | null;
+    if (cur?.chispaNav && cur.modal === kind) {
+      window.history.back();
+    }
+  }, []);
+
+  useEffect(() => {
+    window.history.replaceState(
+      {
+        chispaNav: true,
+        depth: 0,
+        view: { type: 'home' },
+        selectedIdeaId: null,
+        modal: null,
+      } satisfies NavHistoryState,
+      ''
+    );
+
+    const handlePopState = (e: PopStateEvent) => {
+      const state = e.state as NavHistoryState | null;
+      if (!state?.chispaNav) return;
+
+      const viewChanged = !isSameView(state.view, viewRef.current);
+      setView(state.view);
+      setSelectedIdeaId(state.selectedIdeaId);
+      setCaptureOpen(state.modal === 'capture');
+      setSearchOpen(state.modal === 'search');
+      setSyncModalOpen(state.modal === 'sync');
+      setFolderModalOpen(state.modal === 'folder');
+      if (state.modal !== 'move') {
+        setMovingIdea(null);
+      }
+
+      if (viewChanged) {
+        setStatusFilter('all');
+        setKindFilter('all');
+        setLocalSearch('');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const [toast, setToast] = useState<{
     message: string;
@@ -104,15 +252,15 @@ export function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setSearchOpen(true);
+        if (!searchOpen) openSearch();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        setCaptureOpen(true);
+        if (!captureOpen) openCapture();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [searchOpen, captureOpen, openSearch, openCapture]);
 
   const folders =
     useLiveQuery(
@@ -191,11 +339,45 @@ export function App() {
   }, [ideas, inboxIdeas, view, statusFilter, kindFilter, localSearch]);
 
   const handleOpenView = (next: ActiveView) => {
+    const cur = window.history.state as NavHistoryState | null;
+    if (next.type === 'home') {
+      if (cur?.chispaNav && cur.depth === 1 && !selectedIdeaId) {
+        window.history.back();
+        return;
+      }
+      if (isSameView(view, next) && !selectedIdeaId) return;
+      setSelectedIdeaId(null);
+      setStatusFilter('all');
+      setKindFilter('all');
+      setLocalSearch('');
+      setView(next);
+      pushNav(next, null, null);
+      return;
+    }
+
+    if (isSameView(view, next) && !selectedIdeaId) return;
     setSelectedIdeaId(null);
     setStatusFilter('all');
     setKindFilter('all');
     setLocalSearch('');
     setView(next);
+    pushNav(next, null, null);
+  };
+
+  const handleOpenIdea = (ideaId: string) => {
+    const cur = window.history.state as NavHistoryState | null;
+    setCaptureOpen(false);
+    setSearchOpen(false);
+    setSyncModalOpen(false);
+    setFolderModalOpen(false);
+    setMovingIdea(null);
+    setSelectedIdeaId(ideaId);
+
+    if (cur?.chispaNav && cur.modal !== null) {
+      replaceNav(view, ideaId, null);
+    } else {
+      pushNav(view, ideaId, null);
+    }
   };
 
   const handleSaveCapture = async (payload: {
@@ -215,7 +397,7 @@ export function App() {
       ? folderMap.get(payload.folderId)?.name ?? 'carpeta'
       : 'Inbox';
     showToast(`Guardado en ${destName}`, 'Abrir', () => {
-      setSelectedIdeaId(created.id);
+      handleOpenIdea(created.id);
     });
   };
 
@@ -245,7 +427,13 @@ export function App() {
   const handleDeleteFolder = async (folder: Folder) => {
     await softDeleteFolder(folder.id);
     if (view.type === 'folder' && view.folderId === folder.id) {
-      setView({ type: 'home' });
+      const cur = window.history.state as NavHistoryState | null;
+      if (cur?.chispaNav && cur.depth === 1) {
+        window.history.back();
+      } else {
+        setView({ type: 'home' });
+        replaceNav({ type: 'home' }, null, null);
+      }
     }
     showToast('Carpeta eliminada. Sus ideas pasaron al Inbox.');
   };
@@ -303,7 +491,7 @@ export function App() {
 
         <button
           type="button"
-          onClick={() => setCaptureOpen(true)}
+          onClick={openCapture}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-ink)] py-3 text-sm font-semibold text-[var(--accent-ink-fg)] shadow-sm transition hover:opacity-90 active:scale-[0.98]"
         >
           <Plus size={17} />
@@ -315,7 +503,7 @@ export function App() {
 
         <button
           type="button"
-          onClick={() => setSearchOpen(true)}
+          onClick={openSearch}
           className="mt-3 flex w-full items-center justify-between rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-muted)] transition hover:border-[var(--border-strong)]"
         >
           <span className="flex items-center gap-2">
@@ -382,10 +570,7 @@ export function App() {
             </span>
             <button
               type="button"
-              onClick={() => {
-                setEditingFolder(null);
-                setFolderModalOpen(true);
-              }}
+              onClick={() => openFolderModal(null)}
               aria-label="Crear carpeta"
               className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             >
@@ -432,7 +617,7 @@ export function App() {
         {/* Sync status pill at sidebar bottom */}
         <button
           type="button"
-          onClick={() => setSyncModalOpen(true)}
+          onClick={openSyncModal}
           className="mt-4 flex items-center justify-between rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-left transition hover:border-[var(--border-strong)]"
         >
           <span className="flex items-center gap-2.5 text-xs font-medium text-[var(--text-primary)]">
@@ -463,7 +648,7 @@ export function App() {
           <IdeaDetailView
             idea={selectedIdea}
             folders={folders}
-            onBack={() => setSelectedIdeaId(null)}
+            onBack={() => goBackOr(() => setSelectedIdeaId(null))}
             onToast={(m) => showToast(m)}
           />
         ) : view.type === 'home' ? (
@@ -492,7 +677,7 @@ export function App() {
 
                 <button
                   type="button"
-                  onClick={() => setSyncModalOpen(true)}
+                  onClick={openSyncModal}
                   aria-label="Sincronización y cuenta"
                   className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs"
                 >
@@ -549,7 +734,7 @@ export function App() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCaptureOpen(true);
+                    openCapture();
                   }}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-ink)] text-[var(--accent-ink-fg)] transition hover:scale-105"
                   aria-label="Anotar en Inbox"
@@ -586,10 +771,7 @@ export function App() {
                       onOpen={(id) =>
                         handleOpenView({ type: 'folder', folderId: id })
                       }
-                      onEdit={(f) => {
-                        setEditingFolder(f);
-                        setFolderModalOpen(true);
-                      }}
+                      onEdit={(f) => openFolderModal(f)}
                       onDelete={(f) => void handleDeleteFolder(f)}
                     />
                   ))}
@@ -606,10 +788,7 @@ export function App() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setEditingFolder(null);
-                    setFolderModalOpen(true);
-                  }}
+                  onClick={() => openFolderModal(null)}
                   className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bg-subtle)] px-3.5 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
                 >
                   <FolderPlus size={14} />
@@ -638,10 +817,7 @@ export function App() {
                       onOpen={(id) =>
                         handleOpenView({ type: 'folder', folderId: id })
                       }
-                      onEdit={(f) => {
-                        setEditingFolder(f);
-                        setFolderModalOpen(true);
-                      }}
+                      onEdit={(f) => openFolderModal(f)}
                       onDelete={(f) => void handleDeleteFolder(f)}
                     />
                   ))}
@@ -656,7 +832,7 @@ export function App() {
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => handleOpenView({ type: 'home' })}
+                  onClick={() => goBackOr(() => handleOpenView({ type: 'home' }))}
                   aria-label="Volver al inicio"
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs transition hover:bg-[var(--bg-subtle)]"
                 >
@@ -693,7 +869,7 @@ export function App() {
 
               <button
                 type="button"
-                onClick={() => setCaptureOpen(true)}
+                onClick={openCapture}
                 aria-label="Nueva idea aquí"
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-ink)] text-[var(--accent-ink-fg)] shadow-sm transition hover:scale-105"
               >
@@ -776,7 +952,7 @@ export function App() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => setCaptureOpen(true)}
+                    onClick={openCapture}
                     className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-ink)] px-5 py-2.5 text-xs font-semibold text-[var(--accent-ink-fg)]"
                   >
                     <Plus size={14} />
@@ -792,8 +968,8 @@ export function App() {
                       idea.folderId ? folderMap.get(idea.folderId) : undefined
                     }
                     showMoveButton={view.type === 'inbox'}
-                    onOpen={(id) => setSelectedIdeaId(id)}
-                    onQuickMove={(item) => setMovingIdea(item)}
+                    onOpen={handleOpenIdea}
+                    onQuickMove={openMoveModal}
                   />
                 ))
               )}
@@ -840,7 +1016,7 @@ export function App() {
 
               <button
                 type="button"
-                onClick={() => setSearchOpen(true)}
+                onClick={openSearch}
                 aria-label="Buscar"
                 className="inline-flex h-11 w-11 items-center justify-center rounded-full text-[var(--text-secondary)] transition hover:bg-[var(--bg-subtle)]"
               >
@@ -850,7 +1026,7 @@ export function App() {
 
             <button
               type="button"
-              onClick={() => setCaptureOpen(true)}
+              onClick={openCapture}
               aria-label="Capturar nueva chispa"
               className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-ink)] text-[var(--accent-ink-fg)] shadow-[var(--shadow-float)] transition hover:scale-105 active:scale-95"
             >
@@ -865,21 +1041,21 @@ export function App() {
         open={captureOpen}
         folders={folders}
         defaultFolderId={defaultCaptureFolderId}
-        onClose={() => setCaptureOpen(false)}
+        onClose={() => closeModal('capture')}
         onSave={handleSaveCapture}
       />
 
       <FolderModal
         open={folderModalOpen}
         editingFolder={editingFolder}
-        onClose={() => setFolderModalOpen(false)}
+        onClose={() => closeModal('folder')}
         onSave={handleSaveFolder}
       />
 
       <MoveFolderModal
         idea={movingIdea}
         folders={folders}
-        onClose={() => setMovingIdea(null)}
+        onClose={() => closeModal('move')}
         onSelectFolder={handleMoveIdea}
       />
 
@@ -887,13 +1063,13 @@ export function App() {
         open={searchOpen}
         ideas={ideas.filter((i) => i.status !== 'archived')}
         folders={folders}
-        onClose={() => setSearchOpen(false)}
-        onSelectIdea={(id) => setSelectedIdeaId(id)}
+        onClose={() => closeModal('search')}
+        onSelectIdea={handleOpenIdea}
       />
 
       <AccountSyncModal
         open={syncModalOpen}
-        onClose={() => setSyncModalOpen(false)}
+        onClose={() => closeModal('sync')}
         user={sync.user}
         isOnline={sync.isOnline}
         isSupabaseConfigured={sync.isSupabaseConfigured}

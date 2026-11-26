@@ -15,8 +15,8 @@ export default defineConfig({
         short_name: 'Chispa',
         description:
           'Captura tus ideas sin internet y sincronízalas entre tu teléfono y computadora.',
-        theme_color: '#F6F4EF',
-        background_color: '#F6F4EF',
+        theme_color: '#161513',
+        background_color: '#161513',
         display: 'standalone',
         orientation: 'portrait-primary',
         start_url: '/',

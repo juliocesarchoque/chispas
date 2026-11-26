@@ -12,16 +12,31 @@ function getSystemIsDark(): boolean {
 
 function applyThemeToDom(mode: ThemeMode) {
   const isDark = mode === 'dark' || (mode === 'system' && getSystemIsDark());
+  const bgColor = isDark ? '#161513' : '#F6F4EF';
   const root = document.documentElement;
-  if (isDark) {
-    root.classList.add('dark');
-  } else {
-    root.classList.remove('dark');
+  root.classList.toggle('dark', isDark);
+  root.style.colorScheme = isDark ? 'dark' : 'light';
+  root.style.backgroundColor = bgColor;
+
+  if (document.body) {
+    document.body.style.backgroundColor = bgColor;
   }
 
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   if (metaTheme) {
-    metaTheme.setAttribute('content', isDark ? '#161513' : '#F6F4EF');
+    metaTheme.setAttribute('content', bgColor);
+  }
+
+  const metaScheme = document.querySelector('meta[name="color-scheme"]');
+  if (metaScheme) {
+    metaScheme.setAttribute('content', isDark ? 'dark' : 'light');
+  }
+
+  const metaApple = document.querySelector(
+    'meta[name="apple-mobile-web-app-status-bar-style"]'
+  );
+  if (metaApple) {
+    metaApple.setAttribute('content', isDark ? 'black-translucent' : 'default');
   }
 }
 
